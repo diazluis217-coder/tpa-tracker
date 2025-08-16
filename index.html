@@ -7,15 +7,14 @@
   <meta name="theme-color" content="#0ea5e9">
   <title>TPA Tracker — Registro diario</title>
   <style>
-    :root{--bg:#0b1020;--card:#11172b;--ink:#eef2ff;--muted:#9fb3c8;--accent:#0ea5e9;--ok:#10b981;--warn:#f59e0b;--bad:#ef4444;}
+    :root{--bg:#0b1020;--card:#11172b;--ink:#eef2ff;--muted:#9fb3c8;--accent:#0ea5e9;--ok:#10b981;--bad:#ef4444;}
     *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;background:var(--bg);color:var(--ink);}
-    header{position:sticky;top:0;background:linear-gradient(180deg,#0b1020,#0b1020cc 70%,#0b102000);backdrop-filter: blur(6px);padding:14px 12px;z-index:3}
+    header{position:sticky;top:0;background:#0b1020; padding:14px 12px; z-index:3}
     h1{margin:0;font-size:18px;display:flex;gap:8px;align-items:center}
     main{padding:12px;max-width:900px;margin:auto}
     .card{background:var(--card);border:1px solid #1c2544;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.35);padding:14px;margin-bottom:12px}
     label{font-size:12px;color:var(--muted)}
     input,select,textarea{width:100%;padding:10px 12px;border-radius:12px;border:1px solid #2a3560;background:#0f1528;color:var(--ink);outline:none}
-    input[type=checkbox]{width:auto}
     .row{display:grid;grid-template-columns:1fr;gap:10px}
     @media(min-width:720px){.row.cols-2{grid-template-columns:1fr 1fr}.row.cols-3{grid-template-columns:repeat(3,1fr)}}
     .btn{padding:10px 14px;border-radius:12px;border:1px solid #2a3560;background:#0f1528;color:var(--ink);cursor:pointer}
@@ -27,10 +26,11 @@
     .small{font-size:12px;color:var(--muted)}
     .flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
     .right{margin-left:auto}
-    .danger{color:#ffbcc3}
-    .ok{color:#baf7d0}
     .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;}
     .footer{padding:14px 12px;color:var(--muted);text-align:center;font-size:12px}
+    /* Toast */
+    #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#0ea5e9;color:white;padding:10px 14px;border-radius:12px;opacity:0;pointer-events:none;transition:opacity .3s, transform .3s;z-index:9999}
+    #toast.show{opacity:1;transform:translate(-50%,0)}
   </style>
 </head>
 <body>
@@ -65,8 +65,9 @@
       <div class="flex" style="margin-top:10px">
         <button class="btn primary" id="saveBtn">Guardar</button>
         <button class="btn" id="clearBtn">Limpiar</button>
-        <span class="small">Los datos se guardan localmente en tu dispositivo.</span>
+        <span class="small right"><span id="count">0</span> entradas hoy</span>
       </div>
+      <div class="small">Los datos se guardan en <strong>este dispositivo</strong> (localStorage).</div>
     </section>
 
     <section class="card">
@@ -76,85 +77,44 @@
         <button class="btn" id="exportCSV">Exportar CSV</button>
         <label class="btn ghost" for="importFile">Importar CSV</label>
         <input type="file" id="importFile" accept=".csv" style="display:none">
-        <button class="btn danger" id="deleteAll">Borrar todo</button>
+        <button class="btn" id="deleteAll" style="border-color:#ef4444;color:#ef4444">Borrar todo</button>
       </div>
       <div id="list" class="list" style="margin-top:10px"></div>
     </section>
-
-    <section class="card">
-      <div class="small">
-        <strong>Tips rápidos:</strong>
-        • Anotá <em>en el momento</em> • Si el impulso aparece, probá tu lista de alternativas 10’ • Si hubo desliz, volvé al plan en la próxima comida.
-      </div>
-    </section>
   </main>
+  <div id="toast">Guardado ✓</div>
   <div class="footer">Hecho para Luis · Funciona offline tras la primera carga</div>
 
 <script>
-// --- PWA install flow ---
 let deferredPrompt;
 const installBtn = document.getElementById('installBtn');
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault();
-  deferredPrompt = e;
-  installBtn.style.display = 'inline-block';
-});
-installBtn.addEventListener('click', async () => {
-  if(!deferredPrompt) return;
-  deferredPrompt.prompt();
-  await deferredPrompt.userChoice;
-  deferredPrompt = null;
-  installBtn.style.display = 'none';
-});
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; installBtn.style.display = 'inline-block'; });
+installBtn.addEventListener('click', async () => { if(!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt = null; installBtn.style.display = 'none'; });
+if ('serviceWorker' in navigator) { window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js'); }); }
 
-// Register SW
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js');
-  });
-}
-
-// --- Storage helpers ---
 const KEY = 'tpa-tracker-v1';
-function loadAll(){
-  try{ return JSON.parse(localStorage.getItem(KEY)) || []; }catch(e){ return []; }
-}
+function loadAll(){ try{ return JSON.parse(localStorage.getItem(KEY)) || []; }catch(e){ return []; } }
 function saveAll(arr){ localStorage.setItem(KEY, JSON.stringify(arr)); }
 function uid(){ return Math.random().toString(36).slice(2)+Date.now().toString(36); }
 
-// --- UI elements ---
 const $ = (id)=>document.getElementById(id);
 const inputs = ['fecha','hora','lugar','comida','excesiva','pc','secreto','emocion','emocion_val','culpa','vl','menos4','comentarios'].map($);
 const [fecha,hora,lugar,comida,excesiva,pc,secreto,emocion,emocion_val,culpa,vl,menos4,comentarios]=inputs;
-const list = $('list');
+const list = $('list'); const toast = $('toast'); const count = $('count');
 
 function todayISO(){ const d=new Date(); return d.toISOString().slice(0,10); }
 fecha.value = todayISO();
 
-function clearForm(){
-  hora.value='';
-  lugar.value='';
-  comida.value='';
-  excesiva.value='';
-  pc.value='0';
-  secreto.value='N';
-  emocion.value='';
-  emocion_val.value='0';
-  culpa.value='0';
-  vl.value='';
-  menos4.value='';
-  comentarios.value='';
-}
-$('clearBtn').addEventListener('click', clearForm);
+function clearForm(){ hora.value=''; lugar.value=''; comida.value=''; excesiva.value=''; pc.value='0'; secreto.value='N'; emocion.value=''; emocion_val.value='0'; culpa.value='0'; vl.value=''; menos4.value=''; comentarios.value=''; }
+
+function showToast(msg='Guardado ✓'){ toast.textContent = msg; toast.classList.add('show'); setTimeout(()=>toast.classList.remove('show'), 1200); }
 
 function render(){
   const all = loadAll();
   const byDate = all.filter(e=>e.fecha===fecha.value);
+  count.textContent = byDate.length;
   list.innerHTML = '';
-  if(byDate.length===0){
-    list.innerHTML = '<div class="small">Sin registros para esta fecha.</div>';
-    return;
-  }
+  if(byDate.length===0){ list.innerHTML = '<div class="small">Sin registros para esta fecha.</div>'; return; }
   byDate.sort((a,b)=> (a.hora||'').localeCompare(b.hora||''));
   for(const e of byDate){
     const el = document.createElement('div');
@@ -168,9 +128,8 @@ function render(){
       <div class="small">${e.comentarios||''}</div>
       <div class="flex" style="margin-top:6px">
         <button class="btn" data-edit="${e.id}">Editar</button>
-        <button class="btn danger" data-del="${e.id}">Borrar</button>
-      </div>
-    `;
+        <button class="btn" data-del="${e.id}" style="border-color:#ef4444;color:#ef4444">Borrar</button>
+      </div>`;
     list.appendChild(el);
   }
 }
@@ -182,7 +141,9 @@ function addOrUpdate(obj){
   saveAll(all); render();
 }
 
-$('saveBtn').addEventListener('click', ()=>{
+document.getElementById('clearBtn').addEventListener('click', clearForm);
+
+document.getElementById('saveBtn').addEventListener('click', ()=>{
   const entry = {
     id: uid(),
     fecha: fecha.value,
@@ -200,93 +161,55 @@ $('saveBtn').addEventListener('click', ()=>{
     comentarios: comentarios.value.trim()
   };
   addOrUpdate(entry);
+  showToast('Guardado ✓');
   clearForm();
+  window.scrollTo({top:document.body.scrollHeight, behavior:'smooth'});
 });
 
 list.addEventListener('click', (ev)=>{
-  const t = ev.target;
-  const all = loadAll();
-  if(t.dataset.del){
-    const id = t.dataset.del;
-    saveAll(all.filter(e=>e.id!==id)); render();
-  }
+  const t = ev.target; const all = loadAll();
+  if(t.dataset.del){ const id = t.dataset.del; saveAll(all.filter(e=>e.id!==id)); render(); showToast('Borrado'); }
   if(t.dataset.edit){
-    const id = t.dataset.edit;
-    const e = all.find(x=>x.id===id);
-    if(!e) return;
-    // load into form for quick edit, keep same id
+    const id = t.dataset.edit; const e = all.find(x=>x.id===id); if(!e) return;
     hora.value=e.hora||''; lugar.value=e.lugar||''; comida.value=e.comida||''; excesiva.value=e.excesiva?'*':'';
     pc.value=e.pc??0; secreto.value=e.secreto||'N'; emocion.value=e.emocion||''; emocion_val.value=e.emocion_val??0;
     culpa.value=e.culpa??0; vl.value=e.vl||''; menos4.value=e.menos4||''; comentarios.value=e.comentarios||'';
-    // when saved, reuse same id
-    $('saveBtn').onclick = ()=>{
+    const saveBtn = document.getElementById('saveBtn');
+    const handler = ()=>{
       const updated = {
-        id: id,
-        fecha: fecha.value,
-        hora: hora.value,
-        lugar: lugar.value.trim(),
-        comida: comida.value.trim(),
-        excesiva: excesiva.value==='*'?'*':'',
-        pc: parseInt(pc.value||'0'),
-        secreto: secreto.value,
-        emocion: emocion.value.trim(),
-        emocion_val: parseInt(emocion_val.value||'0'),
-        culpa: parseInt(culpa.value||'0'),
-        vl: vl.value,
-        menos4: menos4.value,
-        comentarios: comentarios.value.trim()
+        id, fecha: fecha.value, hora: hora.value, lugar: lugar.value.trim(), comida: comida.value.trim(),
+        excesiva: excesiva.value==='*'?'*':'', pc: parseInt(pc.value||'0'), secreto: secreto.value,
+        emocion: emocion.value.trim(), emocion_val: parseInt(emocion_val.value||'0'), culpa: parseInt(culpa.value||'0'),
+        vl: vl.value, menos4: menos4.value, comentarios: comentarios.value.trim()
       };
-      addOrUpdate(updated);
-      $('saveBtn').onclick = defaultSave;
-      clearForm();
+      addOrUpdate(updated); showToast('Actualizado ✓'); clearForm();
     };
+    saveBtn.addEventListener('click', handler, {once:true});
+    window.scrollTo({top:0, behavior:'smooth'});
   }
 });
 
-function defaultSave(){}
-$('saveBtn').onclick = defaultSave;
-
-$('deleteAll').addEventListener('click', ()=>{
-  if(confirm('¿Borrar TODOS los registros? Esta acción no se puede deshacer.')){
-    localStorage.removeItem(KEY); render();
-  }
-});
-
-// Export CSV (todos los registros)
-$('exportCSV').addEventListener('click', ()=>{
+document.getElementById('exportCSV').addEventListener('click', ()=>{
   const rows = loadAll();
   const headers = ["id","fecha","hora","lugar","comida","excesiva","pc","secreto","emocion","emocion_val","culpa","vl","menos4","comentarios"];
-  const csv = [headers.join(',')].concat(rows.map(r=>headers.map(h=>('"'+String(r[h] if(h in r) else '').replace(/"/g,'""')+'"')).join(','))).join('\n');
+  const csv = [headers.join(',')].concat(rows.map(r=>headers.map(h=>('"' + String((r[h]!==undefined?r[h]:"")).replace(/"/g,'""') + '"')).join(','))).join('\n');
   const blob = new Blob([csv],{type:'text/csv'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'tpa-tracker.csv';
-  a.click();
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'tpa-tracker.csv'; a.click();
 });
 
-// Import CSV (merge)
-$('importFile').addEventListener('change', async (e)=>{
+document.getElementById('importFile').addEventListener('change', async (e)=>{
   const file = e.target.files[0]; if(!file) return;
-  const text = await file.text();
-  const lines = text.trim().split(/\r?\n/);
-  const headers = lines.shift().split(',');
-  const all = loadAll();
-  const ids = new Set(all.map(x=>x.id));
+  const text = await file.text(); const lines = text.trim().split(/\r?\n/); const headers = lines.shift().split(',');
+  const all = loadAll(); const ids = new Set(all.map(x=>x.id));
   for(const line of lines){
     const cols = line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(s=>s.replace(/^"|"$/g,'').replace(/""/g,'"'));
-    const obj = {};
-    headers.forEach((h,i)=>obj[h]=cols[i]||'');
-    if(!ids.has(obj.id)){
-      obj.pc = parseInt(obj.pc||'0'); obj.emocion_val = parseInt(obj.emocion_val||'0'); obj.culpa = parseInt(obj.culpa||'0');
-      all.push(obj); ids.add(obj.id);
-    }
+    const obj = {}; headers.forEach((h,i)=>obj[h]=cols[i]||'');
+    if(!ids.has(obj.id)){ obj.pc = parseInt(obj.pc||'0'); obj.emocion_val = parseInt(obj.emocion_val||'0'); obj.culpa = parseInt(obj.culpa||'0'); all.push(obj); ids.add(obj.id); }
   }
-  saveAll(all); render(); e.target.value='';
+  localStorage.setItem(KEY, JSON.stringify(all)); render(); e.target.value=''; showToast('Importado ✓');
 });
 
-// Switch date re-renders list
 fecha.addEventListener('change', render);
-
 render();
 </script>
 </body>
